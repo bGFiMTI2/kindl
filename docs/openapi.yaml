@@ -1,0 +1,372 @@
+openapi: 3.1.0
+info:
+  title: Observed Kindle device-delivery protocol
+  version: 0.1.0
+  summary: Unofficial protocol description used by kindl
+  description: |-
+    Reverse-engineered description of the HTTP operations required by kindl.
+    This is not an Amazon public API or supported contract. Sensitive examples,
+    content, and credentials are intentionally absent. See protocol.md.
+  license:
+    name: MIT
+    identifier: MIT
+externalDocs:
+  description: Human-readable flow, qualifications, and security notes
+  url: ./protocol.md
+tags:
+  - name: Authorization
+  - name: Registration
+  - name: Library
+  - name: Delivery
+paths:
+  /ap/signin:
+    get:
+      operationId: beginBrowserAuthorization
+      tags: [Authorization]
+      summary: Begin Amazon-hosted device authorization
+      description: |-
+        Opens an interactive browser page. Passwords, MFA, and challenges are
+        handled by Amazon, not by the client. A successful flow redirects to
+        the supplied return URL with an OpenID OAuth authorization code.
+      servers:
+        - url: https://www.amazon.com
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/OpenIdClientId'
+        - name: openid.oa2.scope
+          in: query
+          required: true
+          schema: {type: string, const: device_auth_access}
+        - name: openid.oa2.response_type
+          in: query
+          required: true
+          schema: {type: string, const: code}
+        - name: openid.oa2.code_challenge
+          in: query
+          required: true
+          schema: {type: string, minLength: 43, maxLength: 43}
+        - name: openid.oa2.code_challenge_method
+          in: query
+          required: true
+          schema: {type: string, const: S256}
+        - name: openid.return_to
+          in: query
+          required: true
+          schema: {type: string, format: uri}
+        - name: openid.assoc_handle
+          in: query
+          required: true
+          schema: {type: string, const: amzn_mazama_desktop_us}
+        - name: pageId
+          in: query
+          required: true
+          schema: {type: string, const: amzn_mazama_pc_aui}
+        - name: language
+          in: query
+          required: false
+          schema: {type: string, default: en_US}
+      responses:
+        '200':
+          description: Amazon-hosted interactive HTML; deliberately not modeled
+          content:
+            text/html:
+              schema: {type: string}
+        '302':
+          description: Intermediate or final browser redirect
+  /auth/token:
+    post:
+      operationId: exchangeAuthorizationCode
+      tags: [Authorization]
+      summary: Exchange the browser authorization code
+      servers:
+        - url: https://api.amazon.com
+      security: []
+      parameters:
+        - name: x-amzn-identity-auth-domain
+          in: header
+          required: true
+          schema: {type: string, const: api.amazon.com}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenExchangeRequest'
+      responses:
+        '200':
+          description: Short-lived access token for registration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400': {$ref: '#/components/responses/JsonError'}
+  /FirsProxy/registerDeviceWithToken:
+    post:
+      operationId: registerDevice
+      tags: [Registration]
+      summary: Register a desktop-compatible device identity
+      servers:
+        - url: https://firs-ta-g7g.amazon.com
+      security: []
+      requestBody:
+        required: true
+        content:
+          text/xml:
+            schema:
+              type: string
+              description: |-
+                XML request with parameters deviceName, deviceType,
+                deviceSerialNumber, pid, authToken, authTokenType, and
+                softwareVersion plus desktop softwareVersions metadata.
+      responses:
+        '200':
+          description: XML containing ADP token, RSA private key, and account metadata
+          content:
+            text/xml:
+              schema: {$ref: '#/components/schemas/XmlDocument'}
+  /FirsProxy/getDeviceCredentials:
+    get:
+      operationId: refreshDeviceCredentials
+      tags: [Registration]
+      summary: Refresh rotating ADP device credentials
+      servers:
+        - url: https://firs-ta-g7g.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - name: reason
+          in: query
+          required: true
+          schema: {type: string, const: TodoItem.GET.NAMS}
+      responses:
+        '200':
+          description: XML containing current ADP token and RSA private key
+          content:
+            text/xml:
+              schema: {$ref: '#/components/schemas/XmlDocument'}
+  /FionaTodoListProxy/syncMetaData:
+    get:
+      operationId: listLibrary
+      tags: [Library]
+      summary: Fetch normalized Kindle library metadata
+      servers:
+        - url: https://todo-ta-g7g.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - name: item_count
+          in: query
+          required: true
+          schema: {type: integer, minimum: 1, maximum: 1000, default: 1000}
+        - name: last_sync_time
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: XML add/update and removal metadata lists
+          content:
+            text/xml:
+              schema: {$ref: '#/components/schemas/XmlDocument'}
+  /delivery/manifest/kindle.ebook/{asin}:
+    get:
+      operationId: getDeliveryManifest
+      tags: [Delivery]
+      summary: Obtain the resource manifest for an owned title
+      servers:
+        - url: https://kindle-digital-delivery.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - $ref: '#/components/parameters/Asin'
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Amzn-Accept-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/x.amzn.digital.deliverymanifest@1.0
+      responses:
+        '200':
+          description: Delivery manifest
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeliveryManifest'}
+  /delivery/static/v1/kindle.ebook/{asin}/{resource}:
+    get:
+      operationId: downloadKfxResource
+      tags: [Delivery]
+      summary: Download a KFX component URL supplied by the manifest
+      servers:
+        - url: https://kindle-digital-delivery.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - $ref: '#/components/parameters/Asin'
+        - $ref: '#/components/parameters/Resource'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Original encrypted KFX component
+          content:
+            application/x-kfx-ebook:
+              schema: {type: string, format: binary}
+  /delivery/voucher/v2/kindle.ebook/{asin}/{voucher}:
+    get:
+      operationId: downloadDrmVoucher
+      tags: [Delivery]
+      summary: Download the original DRM voucher
+      description: This operation retrieves but does not decrypt or modify the voucher.
+      servers:
+        - url: https://kindle-digital-delivery.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - $ref: '#/components/parameters/Asin'
+        - name: voucher
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: supportedVoucherVersions
+          in: query
+          required: true
+          schema: {type: string}
+        - name: Accept
+          in: header
+          required: true
+          schema:
+            type: string
+            const: application/x-com.amazon.drm.Voucher@1.0
+      responses:
+        '200':
+          description: Original encrypted DRM voucher
+          content:
+            application/x-com.amazon.drm.Voucher@1.0:
+              schema: {type: string, format: binary}
+components:
+  securitySchemes:
+    ADPToken:
+      type: apiKey
+      in: header
+      name: X-ADP-Authentication-Token
+      description: Sensitive persistent device token
+    ADPDigest:
+      type: apiKey
+      in: header
+      name: X-ADP-Request-Digest
+      description: Per-request RSA signature and timestamp
+  parameters:
+    OpenIdClientId:
+      name: openid.oa2.client_id
+      in: query
+      required: true
+      schema:
+        type: string
+        pattern: '^device:[0-9a-f]+$'
+    Asin:
+      name: asin
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._-]+$'
+    Resource:
+      name: resource
+      in: path
+      required: true
+      schema: {type: string}
+    CorrelationId:
+      name: X-ADP-CorrelationId
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    JsonError:
+      description: JSON error response
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+            properties:
+              error: {type: string}
+              error_description: {type: string}
+              request_id: {type: string}
+  schemas:
+    TokenExchangeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - app_name
+        - client_domain
+        - client_id
+        - code_algorithm
+        - code_verifier
+        - requested_token_type
+        - source_token
+        - source_token_type
+      properties:
+        app_name: {type: string, const: KatxopoWindows}
+        client_domain: {type: string, const: DeviceLegacy}
+        client_id: {type: string, writeOnly: true}
+        code_algorithm: {type: string, const: SHA-256}
+        code_verifier: {type: string, writeOnly: true}
+        requested_token_type: {type: string, const: access_token}
+        source_token: {type: string, writeOnly: true}
+        source_token_type: {type: string, const: authorization_code}
+    TokenResponse:
+      type: object
+      required: [access_token, token_type]
+      properties:
+        access_token: {type: string, writeOnly: true}
+        token_type: {type: string}
+        expires_in: {type: integer}
+        secureSessionToken: {type: string, writeOnly: true}
+    XmlDocument:
+      type: string
+      description: XML document; see protocol.md for observed element names
+    DeliveryManifest:
+      type: object
+      additionalProperties: true
+      properties:
+        content:
+          type: object
+          additionalProperties: true
+          properties:
+            id: {type: string}
+            type: {type: string}
+        resources:
+          type: array
+          items: {$ref: '#/components/schemas/DeliveryResource'}
+        responseContext: {type: object, additionalProperties: true}
+        deliveryMetadata: {type: object, additionalProperties: true}
+    DeliveryResource:
+      type: object
+      additionalProperties: true
+      required: [id, type, requirement]
+      properties:
+        id: {type: string}
+        type: {type: string}
+        requirement:
+          type: string
+          examples: [Required, Preferred, Deferred]
+        size: {type: integer, minimum: 0}
+        deliveryType: {type: string}
+        endpoint:
+          type: object
+          additionalProperties: true
+          properties:
+            type: {type: string}
+            url: {type: string, format: uri}
+        optimalEndpoint:
+          type: object
+          additionalProperties: true
+          properties:
+            directUrl: {type: string, format: uri}
+            expiresAfter: {type: integer}

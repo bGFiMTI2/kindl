@@ -1,0 +1,115 @@
+arazzo: 1.0.1
+info:
+  title: kindl device and delivery workflows
+  version: 0.1.0
+  summary: Ordering and dependencies for the observed protocol
+sourceDescriptions:
+  - name: kindlProtocol
+    url: ./openapi.yaml
+    type: openapi
+workflows:
+  - workflowId: registerAccount
+    summary: Turn a browser authorization result into persistent device credentials
+    description: |-
+      Device identity and PKCE values are generated locally. The interactive
+      browser operation is user-driven; its authorization code and the retained
+      verifier become workflow inputs for the API exchange steps.
+    inputs:
+      type: object
+      required: [authorizationCode, codeVerifier, clientId, serial, pid]
+      properties:
+        authorizationCode: {type: string, writeOnly: true}
+        codeVerifier: {type: string, writeOnly: true}
+        clientId: {type: string, writeOnly: true}
+        serial: {type: string, writeOnly: true}
+        pid: {type: string, writeOnly: true}
+    steps:
+      - stepId: exchangeCode
+        operationId: exchangeAuthorizationCode
+        requestBody:
+          contentType: application/json
+          payload:
+            app_name: KatxopoWindows
+            client_domain: DeviceLegacy
+            client_id: $inputs.clientId
+            code_algorithm: SHA-256
+            code_verifier: $inputs.codeVerifier
+            requested_token_type: access_token
+            source_token: $inputs.authorizationCode
+            source_token_type: authorization_code
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          accessToken: $response.body#/access_token
+      - stepId: registerDevice
+        operationId: registerDevice
+        requestBody:
+          contentType: text/xml
+          payload: |-
+            <request><parameters>
+              <deviceName>%FIRST_NAME%%FIRST_NAME_POSSESSIVE_STRING% Kindle for Windows %DUPE_STRATEGY_2ND%</deviceName>
+              <deviceType>A1UOUY6O7B48AR</deviceType>
+              <deviceSerialNumber>{$inputs.serial}</deviceSerialNumber>
+              <pid>{$inputs.pid}</pid>
+              <authToken>{$steps.exchangeCode.outputs.accessToken}</authToken>
+              <authTokenType>AccessToken</authTokenType>
+              <softwareVersion>4351</softwareVersion>
+            </parameters></request>
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          registrationResponse: $response.body
+    outputs:
+      registrationResponse: $steps.registerDevice.outputs.registrationResponse
+  - workflowId: listBooks
+    summary: List library metadata using saved ADP credentials
+    inputs:
+      type: object
+      properties:
+        limit: {type: integer, minimum: 1, maximum: 1000, default: 1000}
+    steps:
+      - stepId: fetchLibrary
+        operationId: listLibrary
+        parameters:
+          - name: item_count
+            in: query
+            value: $inputs.limit
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          libraryXml: $response.body
+    outputs:
+      libraryXml: $steps.fetchLibrary.outputs.libraryXml
+  - workflowId: downloadBook
+    summary: Refresh credentials, fetch a manifest, and download its resources
+    description: |-
+      Resource iteration and KFX-ZIP packaging are local client behavior. The
+      workflow identifies the network dependency chain; it does not decrypt or
+      transform downloaded content.
+    inputs:
+      type: object
+      required: [asin]
+      properties:
+        asin: {type: string}
+    steps:
+      - stepId: refreshCredentials
+        operationId: refreshDeviceCredentials
+        parameters:
+          - name: reason
+            in: query
+            value: TodoItem.GET.NAMS
+        successCriteria:
+          - condition: $statusCode == 200
+      - stepId: fetchManifest
+        operationId: getDeliveryManifest
+        parameters:
+          - name: asin
+            in: path
+            value: $inputs.asin
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          resources: $response.body#/resources
+          manifest: $response.body
+    outputs:
+      manifest: $steps.fetchManifest.outputs.manifest
