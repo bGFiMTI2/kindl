@@ -1,5 +1,8 @@
 # Contributing
 
+By submitting a contribution to this repository, you agree to license that
+contribution under the repository's MIT License.
+
 Contributions that improve protocol documentation, portability, reliability,
 testing, privacy, and access to content already authorized for the contributor's
 own account are welcome.
