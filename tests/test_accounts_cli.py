@@ -149,4 +149,10 @@ def test_get_all_downloads_every_library_item(monkeypatch, tmp_path):
     assert result.exit_code == 0, result.output
     assert (output / "B000000001" / "B000000001.kfx-zip").is_file()
     assert (output / "B000000002" / "B000000002.kfx-zip").is_file()
+    assert list((output / "B000000001").iterdir()) == [
+        output / "B000000001" / "B000000001.kfx-zip"
+    ]
+    assert list((output / "B000000002").iterdir()) == [
+        output / "B000000002" / "B000000002.kfx-zip"
+    ]
     assert AccountStore.load(config).accounts[0].credentials.adp_token == "refreshed"

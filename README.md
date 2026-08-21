@@ -87,10 +87,12 @@ available; `/` creates subdirectories:
 uv run kindl book get --get-all --format-str "{Author}/{Title} {ASIN}"
 ```
 
-Each directory contains the delivery manifest, KFX component resources, and
-the Amazon DRM voucher. By default, `kindl` also places those files unchanged
-into a flat, uncompressed `.kfx-zip` archive. Use `--required-only` to omit
-deferred resources or `--no-package` to skip that archive.
+By default, `kindl` places the downloaded KFX components and Amazon DRM voucher
+unchanged into a flat, uncompressed `.kfx-zip` archive, then removes the loose
+download files. Each completed book directory therefore contains only its
+`.kfx-zip`. Cleanup happens only after the archive is successfully created.
+Use `--required-only` to omit deferred resources or `--no-package` to retain the
+delivery manifest, component resources, and voucher without creating an archive.
 
 ```powershell
 uv run kindl book package "kindl_downloads\EXISTING_BOOK_DIRECTORY"
