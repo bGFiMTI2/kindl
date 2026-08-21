@@ -47,8 +47,6 @@ normal later runs do not require another browser login.
 
 The default config is `%APPDATA%\kindl\config.json` on Windows and
 `$XDG_CONFIG_HOME/kindl/config.json` (or `~/.config/kindl/config.json`) elsewhere.
-An existing `amzn-device-link` credential file is migrated automatically and
-kept as an account named `default`.
 
 The old `amzn-device-link` executable name remains as a compatibility alias for
 existing virtual environments and scripts. New usage should call `kindl`.
@@ -116,7 +114,7 @@ uv run ruff check scripts src tests
 ```
 
 HAR files, account configs, downloads, and credentials are ignored by Git. Do
-not attach raw captures or debug logs to public issues; they can contain tokens,
+not attach raw captures or debug logs to public issues or discussions; they can contain tokens,
 cookies, personal metadata, and protected content.
 
 ## License
