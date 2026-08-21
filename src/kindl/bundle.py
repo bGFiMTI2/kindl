@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def package_kfx_zip(book_dir: Path, output: Path | None = None) -> Path:
-    """Package unchanged components using KFX Input's KFX-ZIP convention."""
+    """Package unchanged components, then remove the loose downloaded files."""
     if not book_dir.is_dir():
         raise ValueError(f"Downloaded book directory does not exist: {book_dir}")
     destination = output or (book_dir / f"{book_dir.name}.kfx-zip")
@@ -48,4 +48,8 @@ def package_kfx_zip(book_dir: Path, output: Path | None = None) -> Path:
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+
+    for path in book_dir.iterdir():
+        if path != destination and (path.is_file() or path.is_symlink()):
+            path.unlink()
     return destination

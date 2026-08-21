@@ -5,7 +5,9 @@ import pytest
 from kindl.bundle import package_kfx_zip
 
 
-def test_package_kfx_zip_is_flat_stored_and_renames_voucher(tmp_path):
+def test_package_kfx_zip_is_flat_stored_renames_voucher_and_removes_loose_files(
+    tmp_path,
+):
     book = tmp_path / "B012345678"
     book.mkdir()
     (book / "main.azw8").write_bytes(b"main")
@@ -25,6 +27,7 @@ def test_package_kfx_zip_is_flat_stored_and_renames_voucher(tmp_path):
             info.compress_type == zipfile.ZIP_STORED for info in archive.infolist()
         )
         assert archive.read("main.azw8") == b"main"
+    assert list(book.iterdir()) == [output]
 
 
 def test_package_kfx_zip_requires_content_and_voucher(tmp_path):
@@ -32,3 +35,25 @@ def test_package_kfx_zip_requires_content_and_voucher(tmp_path):
     book.mkdir()
     with pytest.raises(ValueError, match="No AZW8/AZW9"):
         package_kfx_zip(book)
+
+
+def test_package_kfx_zip_keeps_loose_files_when_archive_creation_fails(
+    monkeypatch, tmp_path
+):
+    book = tmp_path / "B012345678"
+    book.mkdir()
+    content = book / "main.azw8"
+    voucher = book / "book.voucher"
+    content.write_bytes(b"main")
+    voucher.write_bytes(b"voucher")
+
+    def fail_replace(self, target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("kindl.bundle.Path.replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        package_kfx_zip(book)
+    assert content.is_file()
+    assert voucher.is_file()
+    assert not (book / "B012345678.kfx-zip.part").exists()
