@@ -121,7 +121,9 @@ def test_get_all_downloads_every_library_item(monkeypatch, tmp_path):
         def download(self, asin, output_dir, *, include_optional, destination):
             assert output_dir == output
             assert include_optional
-            destination.mkdir(parents=True)
+            assert destination.parent == output / asin
+            assert destination.name.startswith(".kindl-")
+            assert list(destination.parent.iterdir()) == [destination]
             manifest = destination / "manifest.json"
             content = destination / f"{asin}.azw9"
             voucher = destination / "book.voucher"
@@ -156,3 +158,52 @@ def test_get_all_downloads_every_library_item(monkeypatch, tmp_path):
         output / "B000000002" / "B000000002.kfx-zip"
     ]
     assert AccountStore.load(config).accounts[0].credentials.adp_token == "refreshed"
+
+
+def test_packaged_download_removes_staging_directory_after_failure(
+    monkeypatch, tmp_path
+):
+    config = tmp_path / "config.json"
+    output = tmp_path / "books"
+    AccountStore([Account("personal", credentials())]).save(config)
+    item = LibraryItem("B000000001", "First", ("Author",))
+
+    class FailingClient:
+        def __init__(self, account_credentials=None):
+            self.credentials = account_credentials
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def library(self, *, limit):
+            return [item]
+
+        def refresh_device_credentials(self):
+            return self.credentials
+
+        def download(self, asin, output_dir, *, include_optional, destination):
+            assert destination.name.startswith(".kindl-")
+            (destination / "partial.azw9").write_bytes(b"partial")
+            raise RuntimeError("download failed")
+
+    monkeypatch.setattr(cli_module, "AmazonDeviceClient", FailingClient)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--config",
+            str(config),
+            "book",
+            "get",
+            "--output-dir",
+            str(output),
+            "--format-str",
+            "{Author}/{ASIN}",
+            item.asin,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert list(output.iterdir()) == []

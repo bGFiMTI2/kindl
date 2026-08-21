@@ -87,10 +87,11 @@ available; `/` creates subdirectories:
 uv run kindl book get --get-all --format-str "{Author}/{Title} {ASIN}"
 ```
 
-By default, `kindl` places the downloaded KFX components and Amazon DRM voucher
-unchanged into a flat, uncompressed `.kfx-zip` archive, then removes the loose
-download files. Each completed book directory therefore contains only its
-`.kfx-zip`. Cleanup happens only after the archive is successfully created.
+By default, `kindl` downloads the KFX components and Amazon DRM voucher into a
+unique hidden staging directory, packages them unchanged into a flat,
+uncompressed `.kfx-zip`, and removes the staging directory. The bundle is
+published atomically, so each completed book directory contains only its
+`.kfx-zip`; failed downloads do not leave temporary files or empty directories.
 Use `--required-only` to omit deferred resources or `--no-package` to retain the
 delivery manifest, component resources, and voucher without creating an archive.
 

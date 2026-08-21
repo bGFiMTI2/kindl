@@ -7,6 +7,7 @@ import webbrowser
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 import click
 import httpx
@@ -281,16 +282,43 @@ def book_get(
                 continue
             try:
                 click.echo(f"Downloading {product_id} to {book_dir}", err=True)
-                paths = client.download(
-                    product_id,
-                    output_dir,
-                    include_optional=not required_only,
-                    destination=book_dir,
-                )
-                for path in paths:
-                    click.echo(path)
-                if not no_package:
-                    click.echo(package_kfx_zip(book_dir))
+                if no_package:
+                    paths = client.download(
+                        product_id,
+                        output_dir,
+                        include_optional=not required_only,
+                        destination=book_dir,
+                    )
+                    for path in paths:
+                        click.echo(path)
+                else:
+                    created_dirs: list[Path] = []
+                    parent = book_dir
+                    while parent != output_dir and not parent.exists():
+                        created_dirs.append(parent)
+                        parent = parent.parent
+                    book_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        with TemporaryDirectory(
+                            prefix=".kindl-", dir=book_dir
+                        ) as staging_dir:
+                            client.download(
+                                product_id,
+                                output_dir,
+                                include_optional=not required_only,
+                                destination=Path(staging_dir),
+                            )
+                            archive = package_kfx_zip(
+                                Path(staging_dir),
+                                book_dir / f"{book_dir.name}.kfx-zip",
+                            )
+                        click.echo(archive)
+                    finally:
+                        for directory in created_dirs:
+                            try:
+                                directory.rmdir()
+                            except OSError:
+                                break
             except (ValueError, RuntimeError, OSError, httpx.HTTPError) as exc:
                 if not get_all:
                     raise
