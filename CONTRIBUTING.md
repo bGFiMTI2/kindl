@@ -7,11 +7,17 @@ own account are welcome.
 The following are out of scope:
 
 - DRM decryption, key derivation/extraction, or DRM removal;
+- conversion or export intended to make DRM-protected content readable in
+  otherwise unauthorized software;
 - bypassing authentication, authorization, regional restrictions, rate limits,
   account controls, or payment;
 - acquiring or redistributing another person's content or credentials; and
 - committing captures, tokens, private keys, signed URLs, vouchers, manifests,
   library exports, or downloaded book data.
+
+Do not submit examples or test fixtures obtained from another person's account.
+Do not ask maintainers or users to exchange credentials or downloaded content,
+even privately.
 
 Run before submitting changes:
 

@@ -2,16 +2,20 @@
 
 `kindl` is an independent educational client for studying Amazon's Kindle
 device-registration and digital-delivery protocol. It signs in through the
-normal Amazon browser flow, registers a device identity, lists books available
-to the signed-in account, and downloads the original encrypted delivery
-resources that Amazon returns for an owned title.
+normal Amazon browser flow, emulates the device identity and request shapes
+observed from Kindle for Windows, lists books available to the signed-in
+account, and downloads the original encrypted delivery resources that Amazon
+returns for an authorized title. It is not an official Kindle client or an
+Amazon-certified Supported Device. Amazon accepting a request or registering
+the emulated device does not represent compatibility approval or permission.
 
 > [!IMPORTANT]
 > `kindl` does not decrypt, crack, strip, defeat, or bypass DRM. It does not
 > contain DRM keys, DRM-removal code, or a protected-content parser. Downloaded
 > resources and generated KFX-ZIP archives retain Amazon's original DRM. DRM
 > circumvention is not a project goal, and contributions adding it are out of
-> scope.
+> scope. Do not share credentials, device keys, vouchers, signed URLs, library
+> exports, downloaded resources, or generated archives.
 
 This is unofficial software, is not affiliated with or endorsed by Amazon, and
 is intended for protocol education and interoperability research. Use it only
@@ -99,6 +103,7 @@ uv run kindl book package "kindl_downloads\EXISTING_BOOK_DIRECTORY"
 - [Arazzo 1.0 workflow description](docs/workflows.arazzo.yaml)
 - [HAR sanitization policy and reproduction](docs/har-sanitization.md)
 - [Legal and responsible-use notice](LEGAL.md)
+- [Rights-holder notice process](RIGHTS-HOLDERS.md)
 - [Credits and prior art](CREDITS.md)
 
 The Markdown guide explains intent and behavior for people. OpenAPI describes

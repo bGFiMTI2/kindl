@@ -19,3 +19,11 @@ response contains no newly introduced personal field.
 
 Reports requesting DRM keys, DRM removal, decryption, access to another user's
 account, or bypass of Amazon access controls are outside project scope.
+
+Never share Amazon passwords, OAuth or ADP tokens, device private keys or PIDs,
+browser callback URLs, cookies, signed delivery URLs, vouchers, library
+exports, downloaded resources, or KFX-ZIP archives with maintainers or other
+users. Maintainers do not need these materials to provide normal support.
+
+Intellectual-property or other legal notices are not security reports. Follow
+the private-first process in [RIGHTS-HOLDERS.md](RIGHTS-HOLDERS.md).

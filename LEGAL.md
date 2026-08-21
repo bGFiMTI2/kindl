@@ -11,10 +11,17 @@ consult a qualified lawyer if you need advice about your circumstances.
 knowledge, and development of interoperable software. It is designed to:
 
 - authenticate an account through Amazon's own browser-hosted sign-in flow;
-- register and retain a device identity;
+- generate and register an emulated desktop device identity using identifiers,
+  metadata, and request shapes observed from Kindle for Windows;
 - request library metadata and delivery resources made available to that
   authenticated account; and
 - preserve the encrypted files returned by the service.
+
+This emulation is descriptive interoperability behavior, not a claim that
+`kindl` is Kindle for Windows, official Kindle Software, an Amazon-certified
+Supported Device, or approved by Amazon. A successful authentication,
+registration, or download response does not establish Amazon's approval or a
+legal entitlement to use the interface.
 
 It is not designed to acquire content from another person's account, evade
 access controls, automate password entry, defeat rate limits, conceal identity,
@@ -31,7 +38,10 @@ remain intact.
 
 DRM circumvention is not a project objective. Issues, documentation, or code
 whose purpose is to add DRM removal are outside the project's contribution
-scope.
+scope and will not be accepted. The project will not add content-key derivation
+or extraction, DRM removal, decryption, or conversion/export functionality
+whose purpose is to make protected content readable by otherwise unauthorized
+software.
 
 ## User responsibilities
 
@@ -62,6 +72,21 @@ The observed interfaces are private, undocumented, and may change or stop
 working without notice. Using unofficial clients may carry contractual or
 account risk. The maintainers make no promise that Amazon permits this client,
 that access will remain available, or that an account will not be restricted.
+
+## Rights-holder notices
+
+The maintainers intend to respect valid intellectual-property rights and to
+address substantiated legal concerns in good faith. A rights holder or its
+authorized representative may use the process in
+[RIGHTS-HOLDERS.md](RIGHTS-HOLDERS.md) to identify specific repository material
+and explain the rights and legal basis involved. The maintainers will review a
+complete notice promptly and may correct, restrict, or remove material where
+appropriate.
+
+This statement is not an admission that the project or any identified material
+is unlawful. It does not waive defenses, exceptions, or other rights, and it
+does not promise automatic action in response to an incomplete, mistaken, or
+unverified demand.
 
 ## Privacy and publication
 
