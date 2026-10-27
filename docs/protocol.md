@@ -38,12 +38,13 @@ repository.
 Each account stores:
 
 - local account name;
-- 32-byte hexadecimal device serial;
+- 16-byte (32-hex-character) device serial;
 - eight-character persistent PID;
 - device type;
 - ADP authentication token;
 - RSA private key returned during device registration;
-- directed ID and marketplace when supplied by the service.
+- directed ID and marketplace when supplied by the service;
+- account secrets list restored for empty-recipient (Purchase-class) DRM vouchers.
 
 ## 1. Create the device identity and PKCE values
 
@@ -56,6 +57,55 @@ Implementation:
 
 The serial and PID must remain stable after registration because they identify
 the registered delivery device and participate in later DRM-bound delivery.
+
+> **Serial vs. Hardware DSN Representation**: The software registration flow generates a
+> 16-byte random serial formatted as 32 uppercase hexadecimal characters (`secrets.token_hex(16).upper()`).
+> This 32-character hex representation is used across device registration (`serial`) and client ID
+> derivation (`<serial>#<device-type>`) on software personas (`android`, `ios`, `ios-ipad`, `windows`).
+
+### Client personas (`KINDL_PROFILE`)
+
+`KINDL_PROFILE` selects a built-in client persona (`android` by default, `ios`,
+`ios-ipad`, or `windows`). Only the identity fields and registration flow
+defaults differ, and that identity determines which voucher generation the
+delivery service issues.
+
+| Field | `android` (default) | `ios` | `ios-ipad` | `windows` |
+| --- | --- | --- | --- | --- |
+| `device_type` | `A3VNNDO1I14V03` | `AGZZ1ST63LKBW` | `A1FG5NAKX0MRJL` | `A1UOUY6O7B48AR` |
+| `software_version` | `1286477811` | `1191420432` | `1191420432` | `4351` |
+| `app_name` | `com.amazon.kindle` | `Kindle` | `Kindle` | `KatxopoWindows` |
+| `oem_platform` | `Android` | `iOS` | `iOS` | `Mazama` |
+| `app_version` | = `software_version` | `7.68.1` | `7.68.1` | `4351` |
+| `device_model` | `Pixel 7` | `iPhone` | `iPad` | `PC` |
+| `os_version` | `13` | `17.7.1` | `17.7.1` | `10.0` |
+| `adp_app_id` (`X-ADP-App-Id`) | `com.amazon.kindle` | *(omitted)* | *(omitted)* | `KatxopoWindows` |
+| device-name suffix | `Kindle for Android` | `Kindle for iPhone` | `Kindle for iPad` | `Kindle for Windows` |
+
+- The iOS values come from the iPhone build 7.68.1. `software_version` is the
+  app's `KindlePackedAppVersion` (`1191420432`), not the marketing version.
+- The DSN is the usual 32-character uppercase hex device serial (the analogue of
+  the iOS app's `identifierForVendor`); `kindl`'s generated serial already has
+  exactly that shape.
+- `os_version` may be any iOS version the persona targets; `17.7.1` is the
+  reviewed default. Each field can still be overridden on its own with
+  `KINDL_DEVICE_TYPE`, `KINDL_SW`, `KINDL_APP_NAME`, `KINDL_OEM_PLATFORM`,
+  `KINDL_APP_VERSION`, `KINDL_DEVICE_MODEL`, or `KINDL_OS_VERSION`.
+- The iOS client sends **no** `X-ADP-App-Id` header on delivery requests: when a
+  persona's `adp_app_id` is empty the header is omitted entirely, never sent
+  empty.
+- The advertised `supportedVoucherVersions` list is persona state, not a single
+  protocol constant. The iOS and Android builds share the first 38 entries
+  (`V1`..`V28` plus the ten legacy tags `V9708`..`V5683`) and differ only in the
+  final entries: iOS ends `V1685,V0682,V0456` and sends it on both the manifest
+  URL and the voucher resource query, while Android's manifest requests end
+  `V5683,V9753` and its voucher queries retain the historical capture ending
+  `V5683,V7384,V2746,V3332`. Setting `KINDL_VOUCHER_VERSIONS=table` narrows
+  whichever list the active persona would send to the 38 shared tags; `full`
+  sends the captured list unchanged; any other non-empty value sends an explicit
+  comma-separated tag override. iOS personas (`ios`, `ios-ipad`) default to
+  `table`, while other personas default to `full`. Setting `KINDL_NO_VV=1` omits
+  `?supportedVoucherVersions=...` from the manifest URL.
 
 ## 2. Authorize in the browser
 
@@ -96,6 +146,24 @@ uses a minimal header set and conventional JSON spacing.
 
 The returned access token is short-lived input to device registration. It is
 not the persistent ADP token.
+
+The same endpoint also accepts a refresh grant. Because no `mac_dms` -> bearer
+exchange exists (the service rejects one), a stored refresh token is the only
+browserless route back to an access token:
+
+```json
+{
+  "app_name": "com.amazon.kindle",
+  "client_domain": "DeviceLegacy",
+  "source_token_type": "refresh_token",
+  "source_token": "<OAuth refresh token>",
+  "requested_token_type": "access_token"
+}
+```
+
+MAP registration returns that refresh token in its `bearer` tokens. `kindl`
+stores it with the device credentials, and `kindl user clone` uses it to
+register an additional device persona without a browser.
 
 ## 4. Register the desktop-compatible device
 
@@ -163,7 +231,34 @@ Before a download batch, send a signed `GET` to
 Refreshing once per batch avoids repeating browser login while ensuring the
 delivery requests use current device credentials.
 
-## 8. Request the delivery manifest
+## 8. Restore account secrets for empty-recipient vouchers
+
+Empty-recipient (Purchase-class) DRM vouchers associate account-level secrets
+with the registered client. The Kindle Android client stores these under secure
+storage key `"kindle.account.tokens"`.
+
+To populate or refresh account secrets:
+
+1. Send an ADP-signed `POST` to:
+   ```text
+   https://kindle-digital-delivery.amazon.com/delivery/restoreAccountSecrets
+   ```
+   Headers include `Accept: application/json` and, for personas that define one,
+   `X-ADP-App-Id: com.amazon.kindle` (the iOS persona sends no such header; see
+   "Client personas") with an empty body. The endpoint returns `200 OK` (`{}`),
+   which triggers the service to queue account secret delivery.
+2. Query `GET https://todo-ta-g7g.amazon.com/FionaTodoListProxy/getItems` with
+   an ADP signature.
+3. Locate the `<item>` element where `type="ACSR"` and `action="SET"`.
+4. Extract the comma-separated string from the child `<value>` element.
+5. Save the parsed secrets into the local account configuration under `account_secrets`
+   (comma-split, deduplicated, order preserved).
+6. Send an acknowledgment via:
+   ```text
+   GET https://todo-ta-g7g.amazon.com/FionaTodoListProxy/removeItems?type=ACSR&action=SET&key=<key>&complete_status=COMPLETED
+   ```
+
+## 9. Request the delivery manifest
 
 Send a signed `GET` to:
 
@@ -185,7 +280,7 @@ metadata, attachable resources, a DRM voucher, and user-annotation data.
 User-annotation resources are not downloaded. `--required-only` excludes
 resources that are neither required nor preferred.
 
-## 9. Download the voucher and KFX components
+## 10. Download the voucher and KFX components
 
 All resource requests retain the manifest's correlation ID and receive fresh
 ADP signatures because the complete path and query are signed.
@@ -205,7 +300,7 @@ Each response is streamed to a `.part` file and atomically renamed after a
 successful transfer. The manifest and account config use the same atomic-write
 principle. Interrupted partial files are removed.
 
-## 10. Package KFX-ZIP without changing content
+## 11. Package KFX-ZIP without changing content
 
 KFX delivery commonly consists of multiple files. Following the KFX-ZIP
 convention introduced by John Howell's KFX Input calibre plugin, `kindl` creates

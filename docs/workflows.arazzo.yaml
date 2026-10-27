@@ -61,6 +61,35 @@ workflows:
           registrationResponse: $response.body
     outputs:
       registrationResponse: $steps.registerDevice.outputs.registrationResponse
+  - workflowId: clonePersona
+    summary: Register an additional device persona without a browser
+    description: |-
+      The stored refresh token is exchanged for a fresh access token, which then
+      authorizes another MAP device registration. Only the token exchange is
+      modeled here: the new device identity (a fresh serial and PID) is generated
+      locally and the MAP registration request is not described in openapi.yaml.
+    inputs:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: {type: string, writeOnly: true}
+    steps:
+      - stepId: refreshAccessToken
+        operationId: exchangeAuthorizationCode
+        requestBody:
+          contentType: application/json
+          payload:
+            app_name: com.amazon.kindle
+            client_domain: DeviceLegacy
+            source_token_type: refresh_token
+            source_token: $inputs.refreshToken
+            requested_token_type: access_token
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          accessToken: $response.body#/access_token
+    outputs:
+      accessToken: $steps.refreshAccessToken.outputs.accessToken
   - workflowId: listBooks
     summary: List library metadata using saved ADP credentials
     inputs:
@@ -113,3 +142,26 @@ workflows:
           manifest: $response.body
     outputs:
       manifest: $steps.fetchManifest.outputs.manifest
+  - workflowId: restoreAccountSecrets
+    summary: Restore account secrets for empty-recipient (Purchase-class) DRM vouchers
+    description: |-
+      Calls the digital delivery restoreAccountSecrets endpoint to trigger
+      account secret delivery, then polls the todo items queue to retrieve the
+      ACSR item containing comma-separated account secret strings, and acknowledges it.
+    steps:
+      - stepId: triggerRestore
+        operationId: restoreAccountSecrets
+        successCriteria:
+          - condition: $statusCode == 200
+      - stepId: fetchTodoItems
+        operationId: getTodoItems
+        parameters:
+          - name: reason
+            in: query
+            value: Registration
+        successCriteria:
+          - condition: $statusCode == 200
+        outputs:
+          todoXml: $response.body
+    outputs:
+      todoXml: $steps.fetchTodoItems.outputs.todoXml

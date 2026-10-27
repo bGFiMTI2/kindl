@@ -13,6 +13,15 @@ import click
 import httpx
 from tabulate import tabulate
 
+# Click's visible prompts ultimately use Python's input().  On POSIX terminals,
+# importing readline switches input away from the small canonical TTY buffer
+# (1,024 bytes on macOS).  Amazon's final OpenID URL is commonly longer than
+# that, so without this side-effect a pasted callback can be silently truncated.
+try:
+    import readline  # noqa: F401
+except ImportError:  # pragma: no cover - readline is not available on Windows
+    pass
+
 from .auth import (
     Account,
     AccountStore,
@@ -45,9 +54,7 @@ def _package_version() -> str:
 
 
 @click.group()
-@click.option(
-    "--fmt", default="simple", show_default=True, help="python-tabulate table format"
-)
+@click.option("--fmt", default="simple", show_default=True, help="python-tabulate table format")
 @click.option(
     "--config",
     type=click.Path(path_type=Path, dir_okay=False),
@@ -84,31 +91,41 @@ def user_list(runtime: Runtime) -> None:
         )
         for account in runtime.store.accounts
     )
-    click.echo(tabulate(rows, headers=["Name", "Directed ID", "Device Serial"], tablefmt=runtime.table_format))
+    click.echo(
+        tabulate(
+            rows, headers=["Name", "Directed ID", "Device Serial"], tablefmt=runtime.table_format
+        )
+    )
 
 
 @user_group.command(name="add", help="log in and add an Amazon account")
 @click.argument("name", required=False)
 @click.option("--language", default="en_US", show_default=True)
 @click.option("--replace", is_flag=True, help="replace an existing account with this name")
+@click.option(
+    "--no-browser", is_flag=True, help="print the sign-in URL instead of opening a browser"
+)
 @click.pass_obj
-def user_add(runtime: Runtime, name: str | None, language: str, replace: bool) -> None:
+def user_add(
+    runtime: Runtime, name: str | None, language: str, replace: bool, no_browser: bool
+) -> None:
     name = (name or click.prompt("Account name")).strip()
     if not name:
         raise click.UsageError("account name cannot be empty")
     if runtime.store.get(name) and not replace:
-        raise click.UsageError(
-            f"account {name!r} already exists; use --replace to log in again"
-        )
+        raise click.UsageError(f"account {name!r} already exists; use --replace to log in again")
 
     serial, pid = new_device_identity()
     verifier, challenge = pkce_pair()
     url = AmazonDeviceClient.login_url(serial, challenge, language=language)
-    click.echo("Opening Amazon sign-in in your browser.")
+    if no_browser:
+        click.echo(f"Open this URL in your preferred browser:\n{url}")
+    else:
+        click.echo("Opening Amazon sign-in in your browser.")
     click.echo(
         "After sign-in finishes, copy the complete amazon.com URL from the address bar and paste it here."
     )
-    if not webbrowser.open(url):
+    if not no_browser and not webbrowser.open(url):
         click.echo(f"Open this URL manually:\n{url}")
     final_url = click.prompt("Final URL", prompt_suffix=": ").strip()
     with AmazonDeviceClient() as client:
@@ -116,6 +133,44 @@ def user_add(runtime: Runtime, name: str | None, language: str, replace: bool) -
     runtime.store.add(Account(name, credentials), replace=replace)
     runtime.store.save(runtime.config)
     click.echo(f"Login complete. Account {name!r} saved to {runtime.config}")
+
+
+@user_group.command(
+    name="clone",
+    help=(
+        "register another device persona from a stored refresh token (no browser)\n\n"
+        "SOURCE is an account name, directed ID, or serial. The new persona is created "
+        "with the current identity environment variables (KINDL_DEVICE_TYPE, KINDL_SW, "
+        "KINDL_APP_NAME, KINDL_APP_VERSION, KINDL_DEVICE_MODEL, KINDL_OS_VERSION), so set "
+        "them before running this command; the source account keeps its own identity."
+    ),
+)
+@click.argument("source")
+@click.option("--name", required=True, help="name for the new account")
+@click.pass_obj
+def user_clone(runtime: Runtime, source: str, name: str) -> None:
+    name = name.strip()
+    if not name:
+        raise click.UsageError("account name cannot be empty")
+    if runtime.store.get(name):
+        raise click.UsageError(f"account {name!r} already exists")
+    account = _selected_accounts(runtime, source, one=True)[0]
+    refresh_token = getattr(account.credentials, "refresh_token", "") or ""
+    if not refresh_token:
+        raise click.ClickException(
+            "source account has no stored refresh_token; "
+            "re-login with a current kindl to capture one"
+        )
+    serial, pid = new_device_identity()
+    with AmazonDeviceClient() as client:
+        access_token = client.refresh_bearer(refresh_token)
+        credentials = client.register_persona(access_token, serial, pid)
+    runtime.store.add(Account(name, credentials))
+    runtime.store.save(runtime.config)
+    click.echo(
+        f"Registered persona {name!r} as {credentials.device_type} "
+        f"(device serial ...{credentials.serial[-6:]}); saved to {runtime.config}"
+    )
 
 
 @user_group.command(name="rm", help="remove an account by name, directed ID, or serial")
@@ -127,6 +182,55 @@ def user_remove(runtime: Runtime, identifier: str) -> None:
         raise click.ClickException(f"no account matches {identifier!r}")
     runtime.store.save(runtime.config)
     click.echo(f"Removed {removed.name}")
+
+
+@cli.group(name="secrets", short_help="manage account secrets")
+def secrets_group() -> None:
+    pass
+
+
+@secrets_group.command(name="refresh", short_help="fetch and save account secrets")
+@click.option("-u", "--user", help="account name, directed ID, or serial")
+@click.pass_obj
+def secrets_refresh(runtime: Runtime, user: str | None) -> None:
+    accounts = _selected_accounts(runtime, user, one=False)
+    failures: list[tuple[str, str]] = []
+    for account in accounts:
+        try:
+            with AmazonDeviceClient(account.credentials) as client:
+                secrets = client.restore_account_secrets()
+            runtime.store.save(runtime.config)
+            click.echo(f"Account {account.name!r}: restored {len(secrets)} account secret(s).")
+        except (RuntimeError, httpx.HTTPError, OSError) as exc:
+            failures.append((account.name, str(exc)))
+            click.echo(
+                f"Account {account.name!r}: secrets refresh failed: {exc}",
+                err=True,
+            )
+    if failures:
+        raise click.ClickException(
+            f"{len(failures)} of {len(accounts)} account(s) failed secrets refresh: "
+            + ", ".join(name for name, _ in failures)
+        )
+
+
+@secrets_group.command(name="list", short_help="list account secrets status")
+@click.option("-u", "--user", help="account name, directed ID, or serial")
+@click.pass_obj
+def secrets_list(runtime: Runtime, user: str | None) -> None:
+    accounts = _selected_accounts(runtime, user, one=False)
+    rows = []
+    for account in accounts:
+        sec = getattr(account.credentials, "account_secrets", []) or []
+        lens = ", ".join(f"{len(s)}B" for s in sec) if sec else "none"
+        rows.append((account.name, len(sec), lens))
+    click.echo(
+        tabulate(
+            rows,
+            headers=["Account", "Secrets Count", "Secret Lengths"],
+            tablefmt=runtime.table_format,
+        )
+    )
 
 
 @cli.group(name="book", short_help="list and download Kindle books")
@@ -182,10 +286,11 @@ def book_list(
         click.echo(json.dumps(records, indent=2))
         return
     rows = [
-        (item["title"], ", ".join(item["authors"]), item["asin"], item["owner"])
-        for item in records
+        (item["title"], ", ".join(item["authors"]), item["asin"], item["owner"]) for item in records
     ]
-    click.echo(tabulate(rows, headers=["Title", "Author", "ASIN", "Owner"], tablefmt=runtime.table_format))
+    click.echo(
+        tabulate(rows, headers=["Title", "Author", "ASIN", "Owner"], tablefmt=runtime.table_format)
+    )
 
 
 def _safe_component(value: str) -> str:
@@ -267,13 +372,24 @@ def book_get(
     account = _selected_accounts(runtime, user, one=True)[0]
     items = _library(account, limit)
     by_asin = {item.asin.casefold(): item for item in items}
-    requested = list(dict.fromkeys(item.asin for item in items)) if get_all else list(dict.fromkeys(asin))
+    requested = (
+        list(dict.fromkeys(item.asin for item in items)) if get_all else list(dict.fromkeys(asin))
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     failures: list[tuple[str, str]] = []
     with AmazonDeviceClient(account.credentials) as client:
         client.refresh_device_credentials()
         runtime.store.save(runtime.config)
+        if not getattr(account.credentials, "account_secrets", None) and hasattr(
+            client, "restore_account_secrets"
+        ):
+            try:
+                secrets = client.restore_account_secrets()
+                if secrets:
+                    runtime.store.save(runtime.config)
+            except (RuntimeError, httpx.HTTPError, OSError) as exc:
+                click.echo(f"Account secrets refresh skipped: {exc}", err=True)
         for product_id in requested:
             item = by_asin.get(product_id.casefold()) or LibraryItem(product_id, product_id)
             book_dir = format_book_path(output_dir, format_str, item)
@@ -299,9 +415,7 @@ def book_get(
                         parent = parent.parent
                     book_dir.mkdir(parents=True, exist_ok=True)
                     try:
-                        with TemporaryDirectory(
-                            prefix=".kindl-", dir=book_dir
-                        ) as staging_dir:
+                        with TemporaryDirectory(prefix=".kindl-", dir=book_dir) as staging_dir:
                             client.download(
                                 product_id,
                                 output_dir,

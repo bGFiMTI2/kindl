@@ -1,3 +1,4 @@
+.DS_Store
 .venv/
 .uv-cache/
 __pycache__/
@@ -6,6 +7,7 @@ __pycache__/
 dist/
 downloads/
 credentials.json
+config.json
 kindl_downloads/
 *.har
 *.har.*
@@ -18,3 +20,13 @@ manifest.json
 *.kfx
 *.kfx-zip
 *.voucher
+
+# credential / device-identity artifacts — never track, regardless of location
+*.acsr
+amzn1.account.*
+TrustTokenPrefs
+activeprofile*.txt
+token.txt
+*.token.json
+*.device_token
+*.device_private_key

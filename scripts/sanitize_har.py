@@ -27,13 +27,16 @@ OPAQUE = "__REDACTED_OPAQUE_CONTENT__"
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 PEM_RE = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.DOTALL)
 ASIN_RE = re.compile(r"(?i)\bB[0-9A-Z]{9}\b")
-UUID_RE = re.compile(
-    r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
-)
+UUID_RE = re.compile(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 ACCOUNT_RE = re.compile(r"(?i)\bamzn1\.account\.[A-Z0-9]+\b")
 VOUCHER_RE = re.compile(r"(?i)\bamzn1\.drm-voucher\.[^/?\s]+")
 RESOURCE_RE = re.compile(r"(?i)(?<=CR!)[A-Z0-9]{20,}")
 CONTENT_NUMBER_RE = re.compile(r"(?i)(?<=DTP:)[0-9]{10,}")
+MAC_RE = re.compile(
+    r"(?i)(?<![0-9A-Fa-f:-])(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])"
+)
+COMPOUND_SERIAL_RE = re.compile(r"(?i)\b[0-9A-Za-z]{16,32}#[A-Za-z0-9_.-]+(?:#[A-Za-z0-9_.-]+)?\b")
+HEX32_SERIAL_RE = re.compile(r"(?i)\b[0-9A-Fa-f]{32}\b")
 LONG_OPAQUE_RE = re.compile(r"^[A-Za-z0-9_+=/!:$.-]{48,}$")
 
 SECRET_HEADERS = {
@@ -69,19 +72,25 @@ SECRET_FIELD_NAMES = {
     "appactiontoken",
     "client_id",
     "code_verifier",
+    "deviceid",
     "email",
     "encryptedpasswordexpected",
     "encryptedpwd",
     "guid",
+    "hardwareid",
     "id",
     "key",
+    "mac",
+    "macaddress",
     "metadata1",
     "password",
     "pid",
     "prevrid",
+    "radioid",
     "serial",
     "serialnumber",
     "source_token",
+    "wifimac",
     "workflowstate",
 }
 SECRET_FIELD_PARTS = {
@@ -96,11 +105,16 @@ SECRET_FIELD_PARTS = {
     "correlationid",
     "credential",
     "customer",
+    "deviceid",
     "directedid",
     "email",
+    "hardwareid",
+    "mac",
+    "macaddress",
     "nonce",
     "password",
     "privatekey",
+    "radioid",
     "requestid",
     "secureSessionToken".casefold(),
     "sessionid",
@@ -109,6 +123,7 @@ SECRET_FIELD_PARTS = {
     "token",
     "userid",
     "userkey",
+    "wifimac",
 }
 PRIVATE_XML_FIELDS = {
     "alias",
@@ -116,27 +131,37 @@ PRIVATE_XML_FIELDS = {
     "author",
     "content_size",
     "device_private_key",
+    "deviceid",
     "deviceSerialNumber".casefold(),
     "given_name",
     "guid",
+    "hardwareid",
     "id",
     "kindle_email_address",
+    "mac",
+    "macaddress",
     "name",
     "pid",
     "publication_date",
     "publisher",
     "purchase_date",
+    "radioid",
     "store_authentication_cookie",
     "title",
     "user_device_name",
     "user_directed_id",
     "value",
+    "wifimac",
 }
 SENSITIVE_QUERY_FIELDS = {
     "anti-csrftoken-a2z",
+    "deviceid",
     "directed-id",
     "guid",
+    "hardwareid",
     "key",
+    "mac",
+    "macaddress",
     "openid.claimed_id",
     "openid.identity",
     "openid.oa2.authorization_code",
@@ -145,8 +170,10 @@ SENSITIVE_QUERY_FIELDS = {
     "openid.pape.auth_time",
     "openid.response_nonce",
     "openid.sig",
+    "radioid",
     "serial",
     "session-id",
+    "wifimac",
     "x-adp-correlationid",
     "x-amz-credential",
     "x-amz-date",
@@ -177,9 +204,17 @@ class Sanitizer:
         value = ASIN_RE.sub(lambda match: self.marker("ASIN", match.group()), value)
         value = UUID_RE.sub(lambda match: self.marker("UUID", match.group()), value)
         value = RESOURCE_RE.sub(lambda match: self.marker("RESOURCE", match.group()), value)
-        value = CONTENT_NUMBER_RE.sub(
-            lambda match: self.marker("CONTENT_ID", match.group()), value
-        )
+        value = CONTENT_NUMBER_RE.sub(lambda match: self.marker("CONTENT_ID", match.group()), value)
+        value = MAC_RE.sub(lambda match: self.marker("MAC", match.group()), value)
+
+        def _replace_compound(match: re.Match[str]) -> str:
+            val = match.group()
+            serial_part = val.split("#")[0]
+            self.marker("SERIAL", serial_part)
+            return self.marker("SERIAL", val)
+
+        value = COMPOUND_SERIAL_RE.sub(_replace_compound, value)
+        value = HEX32_SERIAL_RE.sub(lambda match: self.marker("SERIAL", match.group()), value)
         if LONG_OPAQUE_RE.fullmatch(value):
             return self.marker(field, value)
         return value
@@ -231,7 +266,7 @@ class Sanitizer:
             name = str(header.get("name", ""))
             value = str(header.get("value", ""))
             folded = name.casefold()
-            if folded in SECRET_HEADERS:
+            if folded in SECRET_HEADERS or self.field_is_sensitive(name):
                 header["value"] = self.marker(name, value)
             elif folded in URL_HEADERS:
                 header["value"] = self.sanitize_url(value)
@@ -310,9 +345,7 @@ class Sanitizer:
         mime = str(content.get("mimeType", "")).casefold()
         try:
             if "json" in mime:
-                sanitized = json.dumps(
-                    self.sanitize_value(json.loads(text)), separators=(",", ":")
-                )
+                sanitized = json.dumps(self.sanitize_value(json.loads(text)), separators=(",", ":"))
             elif "xml" in mime:
                 sanitized = self.sanitize_xml(text)
             elif mime.startswith("text/plain") and text.strip() in {"", "{}", "[]"}:
@@ -334,10 +367,16 @@ class Sanitizer:
             return [self.redact_known_values(item) for item in value]
         if not isinstance(value, str):
             return value
-        for known in self._values.values():
-            for original, marker in known.items():
-                if len(original) >= 8 and original in value:
-                    value = value.replace(original, marker)
+        all_known = [
+            (orig, marker)
+            for known in self._values.values()
+            for orig, marker in known.items()
+            if len(orig) >= 8
+        ]
+        all_known.sort(key=lambda pair: len(pair[0]), reverse=True)
+        for original, marker in all_known:
+            if original in value:
+                value = value.replace(original, marker)
         return value
 
     def sanitize(self, document: dict[str, Any]) -> dict[str, Any]:
@@ -375,9 +414,7 @@ class Sanitizer:
                 response["redirectURL"] = self.sanitize_url(str(response["redirectURL"]))
 
             if "_initiator" in entry:
-                entry["_initiator"] = self.sanitize_value(
-                    entry["_initiator"], field="initiator"
-                )
+                entry["_initiator"] = self.sanitize_value(entry["_initiator"], field="initiator")
             for message in entry.get("_webSocketMessages", []):
                 if "data" in message:
                     message["data"] = OPAQUE

@@ -2,12 +2,12 @@
 
 `kindl` is an independent educational client for studying Amazon's Kindle
 device-registration and digital-delivery protocol. It signs in through the
-normal Amazon browser flow, emulates the device identity and request shapes
-observed from Kindle for Windows, lists books available to the signed-in
-account, and downloads the original encrypted delivery resources that Amazon
-returns for an authorized title. It is not an official Kindle client or an
-Amazon-certified Supported Device. Amazon accepting a request or registering
-the emulated device does not represent compatibility approval or permission.
+normal Amazon browser flow, emulates the device identity and request shapes,
+lists books available to the signed-in account, and downloads the original
+encrypted delivery resources that Amazon returns for an authorized title.
+It is not an official Kindle client or an Amazon-certified Supported Device.
+Amazon accepting a request or registering the emulated device does not
+represent compatibility approval or permission.
 
 > [!IMPORTANT]
 > `kindl` does not decrypt, crack, strip, defeat, or bypass DRM. It does not
@@ -42,18 +42,9 @@ uv run kindl user add personal
 uv run kindl user add family
 uv run kindl user list
 uv run kindl user rm family
+uv run kindl secrets refresh --user personal
+uv run kindl secrets list
 ```
-
-`user add` opens Amazon in your browser. After sign-in, copy the complete final
-`amazon.com/?openid...` URL from the address bar into the prompt. `kindl` never
-receives or stores your Amazon password. Device credentials are persistent, so
-normal later runs do not require another browser login.
-
-The default config is `%APPDATA%\kindl\config.json` on Windows and
-`$XDG_CONFIG_HOME/kindl/config.json` (or `~/.config/kindl/config.json`) elsewhere.
-
-The old `amzn-device-link` executable name remains as a compatibility alias for
-existing virtual environments and scripts. New usage should call `kindl`.
 
 ## Books
 
@@ -99,9 +90,59 @@ delivery manifest, component resources, and voucher without creating an archive.
 uv run kindl book package "kindl_downloads\EXISTING_BOOK_DIRECTORY"
 ```
 
+## Device identity
+
+`user add` opens Amazon in your browser. After sign-in, copy the complete final
+`amazon.com/?openid...` URL from the address bar into the prompt. `kindl` never
+receives or stores your Amazon password. Device credentials are persistent, so
+normal later runs do not require another browser login.
+
+To use another browser without opening the default browser automatically:
+
+```powershell
+uv run kindl user add personal --no-browser
+```
+
+Copy the printed sign-in URL into your preferred browser, finish signing in,
+then paste the complete final URL from the address bar into the `Final URL` prompt.
+
+The default config is `%APPDATA%\kindl\config.json` on Windows and
+`$XDG_CONFIG_HOME/kindl/config.json` (or `~/.config/kindl/config.json`) elsewhere,
+overridable via `KINDL_CONFIG`.
+
+### Personas (`KINDL_PROFILE`)
+
+`kindl` registers and downloads as the Android (Kindle 8.154) client by default.
+`KINDL_PROFILE` selects a whole client persona:
+- `android` (default): Kindle for Android 8.154 (`A3VNNDO1I14V03`, Pixel 7, Android 13).
+- `ios`: Kindle for iPhone, build 7.68.1 (`AGZZ1ST63LKBW`, iPhone, iOS 17.7.1).
+- `ios-ipad`: Kindle for iPad, build 7.68.1 (`A1FG5NAKX0MRJL`, iPad, iOS 17.7.1).
+- `windows`: Kindle for PC (`A1UOUY6O7B48AR`, KatxopoWindows, Mazama; automatically configures legacy XML registration flow).
+
+```bash
+# Kindle iOS (iPhone) persona
+KINDL_PROFILE=ios uv run kindl user add personal-ios
+
+# Register another persona from stored refresh token without opening a browser
+KINDL_PROFILE=ios-ipad uv run kindl user clone personal --name personal-ipad
+
+# Kindle for Windows persona
+KINDL_PROFILE=windows uv run kindl user add personal-pc
+```
+
+Registration returns an OAuth `refresh_token`, which `kindl` stores alongside
+device credentials. `kindl user clone` spends it on a fresh access token and
+registers another device persona for the same account without opening a browser.
+Set `KINDL_PROFILE` for each clone; the source account keeps its own identity.
+
+- See [`docs/protocol.md`](docs/protocol.md) for persona field values, `KINDL_*` environment overrides, and registration/delivery protocol details.
+
+The old `amzn-device-link` executable name remains as a compatibility alias for
+existing virtual environments and scripts. New usage should call `kindl`.
+
 ## Documentation
 
-- [Human-readable protocol flow](docs/protocol.md)
+- [Protocol and persona specification](docs/protocol.md)
 - [OpenAPI 3.1 endpoint description](docs/openapi.yaml)
 - [Arazzo 1.0 workflow description](docs/workflows.arazzo.yaml)
 - [HAR sanitization policy and reproduction](docs/har-sanitization.md)

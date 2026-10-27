@@ -77,7 +77,12 @@ paths:
     post:
       operationId: exchangeAuthorizationCode
       tags: [Authorization]
-      summary: Exchange the browser authorization code
+      summary: Exchange the browser authorization code or a stored refresh token
+      description: |-
+        The authorization_code grant returns a short-lived access token for
+        registration. The refresh_token grant is the only browserless route back
+        to an access token (no mac_dms -> bearer exchange exists); the refresh
+        token comes from MAP registration's bearer tokens.
       servers:
         - url: https://api.amazon.com
       security: []
@@ -91,7 +96,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TokenExchangeRequest'
+              oneOf:
+                - $ref: '#/components/schemas/TokenExchangeRequest'
+                - $ref: '#/components/schemas/BearerRefreshRequest'
       responses:
         '200':
           description: Short-lived access token for registration
@@ -170,6 +177,112 @@ paths:
           content:
             text/xml:
               schema: {$ref: '#/components/schemas/XmlDocument'}
+  /FionaTodoListProxy/getItems:
+    get:
+      operationId: getTodoItems
+      tags: [Delivery]
+      summary: Retrieve pending todo items including ACSR account secrets
+      servers:
+        - url: https://todo-ta-g7g.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - name: software_rev
+          in: query
+          required: false
+          schema: {type: string}
+        - name: device_lto
+          in: query
+          required: false
+          schema: {type: string}
+        - name: patch_rev
+          in: query
+          required: false
+          schema: {type: string}
+        - name: os_version
+          in: query
+          required: false
+          schema: {type: string}
+        - name: device_model
+          in: query
+          required: false
+          schema: {type: string}
+        - name: reason
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: XML response containing pending todo items
+          content:
+            text/xml:
+              schema: {$ref: '#/components/schemas/XmlDocument'}
+  /FionaTodoListProxy/removeItems:
+    get:
+      operationId: removeTodoItems
+      tags: [Delivery]
+      summary: Acknowledge processed todo items
+      servers:
+        - url: https://todo-ta-g7g.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema: {type: string}
+        - name: action
+          in: query
+          required: true
+          schema: {type: string}
+        - name: key
+          in: query
+          required: true
+          schema: {type: string}
+        - name: complete_status
+          in: query
+          required: true
+          schema: {type: string, enum: [COMPLETED, FAILED, CANCELLED, UNRECOGNIZED]}
+        - name: failure_code
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: XML response acknowledging item removal
+          content:
+            text/xml:
+              schema: {$ref: '#/components/schemas/XmlDocument'}
+  /delivery/restoreAccountSecrets:
+    post:
+      operationId: restoreAccountSecrets
+      tags: [Delivery]
+      summary: Request restoration of account secrets for empty-recipient DRM vouchers
+      servers:
+        - url: https://kindle-digital-delivery.amazon.com
+      security:
+        - ADPToken: []
+          ADPDigest: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-ADP-App-Id
+          in: header
+          required: false
+          description: |-
+            Client app id. Personas that define one (android) send
+            com.amazon.kindle; the iOS personas (KINDL_PROFILE=ios/ios-ipad)
+            send no X-ADP-App-Id header at all.
+          schema: {type: string, default: com.amazon.kindle}
+      responses:
+        '200':
+          description: Acknowledgment triggering account secrets delivery
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /delivery/manifest/kindle.ebook/{asin}:
     get:
       operationId: getDeliveryManifest
@@ -320,6 +433,21 @@ components:
         requested_token_type: {type: string, const: access_token}
         source_token: {type: string, writeOnly: true}
         source_token_type: {type: string, const: authorization_code}
+    BearerRefreshRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - app_name
+        - client_domain
+        - source_token_type
+        - source_token
+        - requested_token_type
+      properties:
+        app_name: {type: string, examples: [com.amazon.kindle, KatxopoWindows]}
+        client_domain: {type: string, const: DeviceLegacy}
+        source_token_type: {type: string, const: refresh_token}
+        source_token: {type: string, writeOnly: true}
+        requested_token_type: {type: string, const: access_token}
     TokenResponse:
       type: object
       required: [access_token, token_type]
