@@ -111,11 +111,15 @@ def test_user_add_browser_modes(
     registrations = []
 
     class FakeClient:
+        def __init__(self, *, region):
+            assert region == "us"
+
         @staticmethod
-        def login_url(serial, challenge, *, language):
+        def login_url(serial, challenge, *, language, region):
             assert serial == account_credentials.serial
             assert challenge == "challenge"
             assert language == "en_US"
+            assert region == "us"
             return login_url
 
         def __enter__(self):
@@ -179,6 +183,9 @@ def test_user_clone_registers_persona_without_leaking_tokens(monkeypatch, tmp_pa
     calls = {}
 
     class FakeClient:
+        def __init__(self, *, region):
+            calls["region"] = region
+
         def __enter__(self):
             return self
 
@@ -208,6 +215,7 @@ def test_user_clone_registers_persona_without_leaking_tokens(monkeypatch, tmp_pa
 
     assert result.exit_code == 0, result.output
     assert calls == {
+        "region": "us",
         "refresh_token": "synth-refresh",
         "persona": ("synth-access", "C" * 32, "D" * 8),
     }
