@@ -162,12 +162,13 @@ Evidence for `jp`:
   the same error schema as `api.amazon.com`.
 - Observed: `firs-ta-g7g`, `todo-ta-g7g`, and `kindle-digital-delivery` have no
   `amazon.co.jp` DNS names.
-- Inferred: a `jp` authorization code is exchanged and the device registered on
-  `api.amazon.co.jp` with a `.amazon.co.jp` cookie domain, as other open-source
-  Amazon device clients do for Japan.
-- Inferred: `jp` accounts use the shared `amazon.com` device-service hosts for
-  library metadata, credential refresh, account secrets, and delivery, as other
-  open-source Kindle clients do for Japan.
+- Observed: a `jp` authorization code is exchanged and the device registered
+  (MAP flow) on `api.amazon.co.jp` with a `.amazon.co.jp` cookie domain; the
+  registration reports preferred marketplace `A1VC38T7YXB528`.
+- Observed: `jp` accounts use the shared `amazon.com` device-service hosts for
+  library metadata, credential refresh, account secrets, and delivery.
+- Inferred: the refresh-token grant used by `user clone` works on
+  `api.amazon.co.jp` the same way; it has not been exercised with a `jp` account.
 
 ## 3. Exchange the authorization code
 
