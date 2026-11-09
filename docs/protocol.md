@@ -29,7 +29,7 @@ repository.
 | Actor | Responsibility |
 | --- | --- |
 | Browser | Amazon sign-in and user-facing challenges |
-| `api.amazon.com` | Exchanges an authorization code for a short-lived access token |
+| Identity service (`api.amazon.com`, `api.amazon.co.jp`) | Regional; exchanges an authorization code for a short-lived access token and performs MAP registration |
 | FIRS | Registers the emulated desktop device and refreshes ADP credentials |
 | Todo metadata service | Returns Kindle library metadata |
 | Digital delivery service | Returns a manifest, voucher, and KFX components |
@@ -44,6 +44,7 @@ Each account stores:
 - ADP authentication token;
 - RSA private key returned during device registration;
 - directed ID and marketplace when supplied by the service;
+- marketplace region (`us` or `jp`; configs without one are `us`);
 - account secrets list restored for empty-recipient (Purchase-class) DRM vouchers.
 
 ## 1. Create the device identity and PKCE values
@@ -109,15 +110,18 @@ delivery service issues.
 
 ## 2. Authorize in the browser
 
-Open `GET https://www.amazon.com/ap/signin` with OpenID 2.0 and OAuth-extension
+Open `GET https://www.amazon.com/ap/signin` (`https://www.amazon.co.jp/ap/signin`
+for the `jp` region; see "Regions" below) with OpenID 2.0 and OAuth-extension
 parameters. Important observed constants include:
 
-- association handle `amzn_mazama_desktop_us`;
+- association handle `amzn_mazama_desktop_us` (`amzn_mazama_desktop_jp` for `jp`);
 - page ID `amzn_mazama_pc_aui`;
 - OAuth scope `device_auth_access`;
 - response type `code`;
 - code-challenge method `S256`;
-- return URL `https://www.amazon.com/`;
+- OAuth extension namespace `http://www.amazon.com/ap/ext/oauth/2` in every
+  region (it is an identifier, not a URL);
+- return URL `https://www.amazon.com/` (`https://www.amazon.co.jp/` for `jp`);
 - client ID `device:` followed by the lowercase hex encoding of
   `<serial>#<device-type>`.
 
@@ -125,9 +129,51 @@ After successful sign-in, Amazon redirects to the return URL. The query includes
 `openid.oa2.authorization_code`. Other signed OpenID response fields establish
 the browser response but are not sent to the token endpoint by `kindl`.
 
+### Regions
+
+Amazon keeps separate customer accounts for each regional site, so an account
+authorizes, exchanges its code, and registers on the site where it was created.
+`kindl user add --region` selects the region (default `us`) and saves it with
+the account; later commands, including `user clone`, read it from the config.
+Accounts saved before regions existed load as `us`.
+
+| Value | `us` (default) | `jp` |
+| --- | --- | --- |
+| Sign-in page | `https://www.amazon.com/ap/signin` | `https://www.amazon.co.jp/ap/signin` |
+| `openid.assoc_handle` | `amzn_mazama_desktop_us` | `amzn_mazama_desktop_jp` |
+| `openid.return_to` | `https://www.amazon.com/` | `https://www.amazon.co.jp/` |
+| Identity host (`/auth/token`, `/auth/register`, `x-amzn-identity-auth-domain`) | `api.amazon.com` | `api.amazon.co.jp` |
+| MAP registration cookie domain | `.amazon.com` | `.amazon.co.jp` |
+| FIRS, todo metadata, and digital-delivery hosts | `*.amazon.com` | the same `*.amazon.com` hosts |
+
+Evidence for `jp`:
+
+- Observed: with `amzn_mazama_desktop_jp` and return URL
+  `https://www.amazon.co.jp/`, `www.amazon.co.jp/ap/signin` serves the sign-in
+  form, and a completed sign-in redirects to the return URL with
+  `openid.oa2.authorization_code` (listed in `openid.signed`), `openid.ns.oa2`
+  unchanged, and `openid.op_endpoint` `https://www.amazon.co.jp/ap/signin`.
+- Observed: Amazon answers HTTP 404 ("not a functioning page") when the handle
+  and the site disagree: `amzn_mazama_desktop_us` on `www.amazon.co.jp`,
+  `amzn_mazama_desktop_jp` on `www.amazon.com`, or the `jp` handle with an
+  `amazon.com` return URL. Replacing `amazon.com` with `amazon.co.jp`
+  throughout the request therefore fails.
+- Observed: `api.amazon.co.jp` answers `/auth/token` and `/auth/register` with
+  the same error schema as `api.amazon.com`.
+- Observed: `firs-ta-g7g`, `todo-ta-g7g`, and `kindle-digital-delivery` have no
+  `amazon.co.jp` DNS names.
+- Observed: a `jp` authorization code is exchanged and the device registered
+  (MAP flow) on `api.amazon.co.jp` with a `.amazon.co.jp` cookie domain; the
+  registration reports preferred marketplace `A1VC38T7YXB528`.
+- Observed: `jp` accounts use the shared `amazon.com` device-service hosts for
+  library metadata, credential refresh, account secrets, and delivery.
+- Inferred: the refresh-token grant used by `user clone` works on
+  `api.amazon.co.jp` the same way; it has not been exercised with a `jp` account.
+
 ## 3. Exchange the authorization code
 
-Send `POST https://api.amazon.com/auth/token` as JSON. The legacy desktop
+Send `POST https://api.amazon.com/auth/token` (`api.amazon.co.jp` for `jp`) as
+JSON, with `x-amzn-identity-auth-domain` naming the same host. The legacy desktop
 endpoint proved sensitive to request shape, so the implementation intentionally
 uses a minimal header set and conventional JSON spacing.
 
@@ -324,8 +370,10 @@ login/library/download path.
 ## Known limitations
 
 - These are private endpoints, not a supported public API.
-- The flow is based on one observed desktop-client family and may be regional or
-  version dependent.
+- The flow is based on one observed desktop-client family and may be version
+  dependent.
+- Only the `us` and `jp` regions are implemented. Other Amazon sites need their
+  own association handle and identity host, which have not been verified.
 - The library request is capped at 1000 items because that is the observed and
   implemented range; no additional pagination contract has been established.
 - A successful download does not imply that third-party software can open the

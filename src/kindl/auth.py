@@ -29,6 +29,8 @@ from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 
+from .regions import DEFAULT_REGION
+
 #: The 38 base format tags shared across modern Kindle client builds (`V1`..`V28`
 #: plus the ten legacy tags `V9708`..`V5683`).
 TABLE_VERSION_TAGS: tuple[str, ...] = (
@@ -298,6 +300,9 @@ class DeviceCredentials:
     # the only browserless re-authentication route: no mac_dms -> bearer exchange
     # exists. Old configs simply load the empty default.
     refresh_token: str = ""
+    # Amazon marketplace region (see kindl.regions) the account signed in to.
+    # Configs saved before regions existed load as "us", the only region then.
+    region: str = DEFAULT_REGION
 
     @classmethod
     def load(cls, path: Path) -> DeviceCredentials:

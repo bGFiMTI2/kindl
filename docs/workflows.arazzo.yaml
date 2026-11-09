@@ -13,7 +13,9 @@ workflows:
     description: |-
       Device identity and PKCE values are generated locally. The interactive
       browser operation is user-driven; its authorization code and the retained
-      verifier become workflow inputs for the API exchange steps.
+      verifier become workflow inputs for the API exchange steps. The sign-in
+      page and exchangeCode use the servers of the account's region (us or jp);
+      registerDevice uses the FIRS host shared by every region.
     inputs:
       type: object
       required: [authorizationCode, codeVerifier, clientId, serial, pid]
@@ -68,6 +70,7 @@ workflows:
       authorizes another MAP device registration. Only the token exchange is
       modeled here: the new device identity (a fresh serial and PID) is generated
       locally and the MAP registration request is not described in openapi.yaml.
+      Both requests go to the identity service of the source account's region.
     inputs:
       type: object
       required: [refreshToken]

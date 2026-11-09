@@ -26,9 +26,14 @@ from .auth import (
     profile_for_device_type,
 )
 from .models import LibraryItem
+from .regions import DEFAULT_REGION, REGIONS, Region, get_region
 
-AUTH_URL = "https://www.amazon.com/ap/signin"
-TOKEN_URL = "https://api.amazon.com/auth/token"
+#: The US sign-in and token endpoints, kept for backwards compatibility. The
+#: client uses the values of its account's region (:data:`kindl.regions.REGIONS`).
+AUTH_URL = REGIONS[DEFAULT_REGION].signin_url
+TOKEN_URL = REGIONS[DEFAULT_REGION].token_url
+#: The Kindle device services below have no regional host names and serve
+#: every region.
 REGISTER_URL = "https://firs-ta-g7g.amazon.com/FirsProxy/registerDeviceWithToken"
 DEVICE_CREDENTIALS_URL = "https://firs-ta-g7g.amazon.com/FirsProxy/getDeviceCredentials"
 LIBRARY_URL = "https://todo-ta-g7g.amazon.com/FionaTodoListProxy/syncMetaData"
@@ -170,8 +175,18 @@ def delivery_filename(url: str, fallback: str = "resource") -> str:
 
 
 class AmazonDeviceClient:
-    def __init__(self, credentials: DeviceCredentials | None = None, *, timeout: float = 60.0):
+    def __init__(
+        self,
+        credentials: DeviceCredentials | None = None,
+        *,
+        timeout: float = 60.0,
+        region: str | None = None,
+    ):
         self.credentials = credentials
+        # An explicit region wins; otherwise use the account's saved region.
+        self.region: Region = get_region(
+            region if region is not None else getattr(credentials, "region", None)
+        )
         self.http = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
@@ -188,14 +203,14 @@ class AmazonDeviceClient:
         # and headers aligned with the captured Kindle for Windows request.
         request = self.http.build_request(
             "POST",
-            TOKEN_URL,
+            self.region.token_url,
             content=json.dumps(payload).encode(),
             headers={
                 "Accept-Encoding": "gzip, deflate",
                 "Cache-Control": "no-cache",
                 "Connection": "Keep-Alive",
                 "Content-Type": "application/json",
-                "x-amzn-identity-auth-domain": "api.amazon.com",
+                "x-amzn-identity-auth-domain": self.region.identity_host,
             },
         )
         request.headers.pop("Accept", None)
@@ -226,11 +241,20 @@ class AmazonDeviceClient:
         self.close()
 
     @staticmethod
-    def login_url(serial: str, challenge: str, *, language: str = "en_US") -> str:
+    def login_url(
+        serial: str,
+        challenge: str,
+        *,
+        language: str = "en_US",
+        region: str = DEFAULT_REGION,
+    ) -> str:
+        selected = get_region(region)
         device_type = persona_value("device_type")
         params = {
             "openid.oa2.client_id": f"device:{device_client_id(serial, device_type)}",
             "openid.claimed_id": "http://specs.openid.net/auth/2.0/identifier_select",
+            # An extension namespace identifier, not a URL: it stays the same in
+            # every region (amazon.co.jp echoes this exact value in its response).
             "openid.ns.oa2": "http://www.amazon.com/ap/ext/oauth/2",
             "openid.ns": "http://specs.openid.net/auth/2.0",
             "openid.identity": "http://specs.openid.net/auth/2.0/identifier_select",
@@ -239,16 +263,16 @@ class AmazonDeviceClient:
             "openid.oa2.response_type": "code",
             "openid.oa2.code_challenge": challenge,
             "openid.oa2.code_challenge_method": "S256",
-            "openid.return_to": "https://www.amazon.com/",
+            "openid.return_to": selected.return_to,
             "openid.ns.pape": "http://specs.openid.net/extensions/pape/1.0",
             "openid.pape.max_auth_age": "0",
             "accountStatusPolicy": "P1",
             "pageId": "amzn_mazama_pc_aui",
-            "openid.assoc_handle": "amzn_mazama_desktop_us",
+            "openid.assoc_handle": selected.assoc_handle,
             "disableLoginPrepopulate": "1",
             "language": language,
         }
-        return f"{AUTH_URL}?{urlencode(params)}"
+        return f"{selected.signin_url}?{urlencode(params)}"
 
     def register(self, final_url: str, verifier: str, serial: str, pid: str) -> DeviceCredentials:
         code = parse_qs(urlsplit(final_url.strip()).query).get(
@@ -313,10 +337,11 @@ class AmazonDeviceClient:
             directed_id=_text(root, "user_directed_id"),
             marketplace=_text(root, "preferred_marketplace"),
             software_version=software_version,
+            region=self.region.code,
         )
 
     def _register_map(self, access_token: str, serial: str, pid: str) -> DeviceCredentials:
-        """The modern MAP registration (POST api.amazon.com/auth/register).
+        """The modern MAP registration (POST <region identity host>/auth/register).
 
         This is what the real Kindle app uses; legacy-XML registrations for
         the android device family are rejected by the delivery service.
@@ -347,7 +372,7 @@ class AmazonDeviceClient:
                 "website_cookies",
                 "store_authentication_cookie",
             ],
-            "cookies": {"website_cookies": [], "domain": ".amazon.com"},
+            "cookies": {"website_cookies": [], "domain": self.region.cookie_domain},
             "registration_data": {
                 "domain": "Device",
                 "device_type": device_type,
@@ -363,11 +388,11 @@ class AmazonDeviceClient:
             "requested_extensions": ["device_info", "customer_info"],
         }
         response = self.http.post(
-            "https://api.amazon.com/auth/register",
+            self.region.register_url,
             json=body,
             headers={
                 "Content-Type": "application/json",
-                "x-amzn-identity-auth-domain": "api.amazon.com",
+                "x-amzn-identity-auth-domain": self.region.identity_host,
                 "Authorization": f"Bearer {access_token}",
                 "Accept-Language": "en-US",
                 "Accept": "application/json",
@@ -400,6 +425,7 @@ class AmazonDeviceClient:
             marketplace=customer_info.get("preferred_marketplace", ""),
             software_version=sw,
             refresh_token=refresh_token if isinstance(refresh_token, str) else "",
+            region=self.region.code,
         )
 
     def register_persona(self, access_token: str, serial: str, pid: str) -> DeviceCredentials:
@@ -419,7 +445,7 @@ class AmazonDeviceClient:
         owns the returned access token; it is not persisted here.
         """
         response = self.http.post(
-            TOKEN_URL,
+            self.region.token_url,
             json={
                 "app_name": APP_NAME,
                 "client_domain": "DeviceLegacy",
@@ -429,7 +455,7 @@ class AmazonDeviceClient:
             },
             headers={
                 "Content-Type": "application/json",
-                "x-amzn-identity-auth-domain": "api.amazon.com",
+                "x-amzn-identity-auth-domain": self.region.identity_host,
                 "Accept": "application/json",
             },
         )

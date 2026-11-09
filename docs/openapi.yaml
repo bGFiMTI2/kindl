@@ -28,8 +28,14 @@ paths:
         Opens an interactive browser page. Passwords, MFA, and challenges are
         handled by Amazon, not by the client. A successful flow redirects to
         the supplied return URL with an OpenID OAuth authorization code.
+        Amazon keeps separate accounts per regional site, so the server is the
+        account's region; the association handle and return URL must belong to
+        the same site or Amazon answers 404.
       servers:
         - url: https://www.amazon.com
+          description: us region (default)
+        - url: https://www.amazon.co.jp
+          description: jp region
       security: []
       parameters:
         - $ref: '#/components/parameters/OpenIdClientId'
@@ -52,11 +58,13 @@ paths:
         - name: openid.return_to
           in: query
           required: true
+          description: Root of the sign-in site, e.g. https://www.amazon.co.jp/ for jp
           schema: {type: string, format: uri}
         - name: openid.assoc_handle
           in: query
           required: true
-          schema: {type: string, const: amzn_mazama_desktop_us}
+          description: amzn_mazama_desktop_us on www.amazon.com, amzn_mazama_desktop_jp on www.amazon.co.jp
+          schema: {type: string, enum: [amzn_mazama_desktop_us, amzn_mazama_desktop_jp]}
         - name: pageId
           in: query
           required: true
@@ -82,15 +90,20 @@ paths:
         The authorization_code grant returns a short-lived access token for
         registration. The refresh_token grant is the only browserless route back
         to an access token (no mac_dms -> bearer exchange exists); the refresh
-        token comes from MAP registration's bearer tokens.
+        token comes from MAP registration's bearer tokens. The identity service
+        is regional: use the server of the account's region and send its host
+        name in x-amzn-identity-auth-domain.
       servers:
         - url: https://api.amazon.com
+          description: us region (default)
+        - url: https://api.amazon.co.jp
+          description: jp region
       security: []
       parameters:
         - name: x-amzn-identity-auth-domain
           in: header
           required: true
-          schema: {type: string, const: api.amazon.com}
+          schema: {type: string, enum: [api.amazon.com, api.amazon.co.jp]}
       requestBody:
         required: true
         content:

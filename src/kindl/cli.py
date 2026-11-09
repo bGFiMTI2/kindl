@@ -33,6 +33,7 @@ from .auth import (
 from .bundle import package_kfx_zip
 from .client import WINDOWS_RESERVED_NAMES, AmazonDeviceClient
 from .models import LibraryItem
+from .regions import DEFAULT_REGION, REGIONS, get_region
 
 DEFAULT_FORMAT = "{Author} - {Title} {ASIN}"
 INVALID_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -88,12 +89,15 @@ def user_list(runtime: Runtime) -> None:
             account.name,
             account.credentials.directed_id or "-",
             account.credentials.serial,
+            account.credentials.region,
         )
         for account in runtime.store.accounts
     )
     click.echo(
         tabulate(
-            rows, headers=["Name", "Directed ID", "Device Serial"], tablefmt=runtime.table_format
+            rows,
+            headers=["Name", "Directed ID", "Device Serial", "Region"],
+            tablefmt=runtime.table_format,
         )
     )
 
@@ -101,13 +105,27 @@ def user_list(runtime: Runtime) -> None:
 @user_group.command(name="add", help="log in and add an Amazon account")
 @click.argument("name", required=False)
 @click.option("--language", default="en_US", show_default=True)
+@click.option(
+    "--region",
+    type=click.Choice(sorted(REGIONS), case_sensitive=False),
+    default=DEFAULT_REGION,
+    show_default=True,
+    help="Amazon site the account belongs to ("
+    + ", ".join(f"{code}: {region.site}" for code, region in REGIONS.items())
+    + ")",
+)
 @click.option("--replace", is_flag=True, help="replace an existing account with this name")
 @click.option(
     "--no-browser", is_flag=True, help="print the sign-in URL instead of opening a browser"
 )
 @click.pass_obj
 def user_add(
-    runtime: Runtime, name: str | None, language: str, replace: bool, no_browser: bool
+    runtime: Runtime,
+    name: str | None,
+    language: str,
+    region: str,
+    replace: bool,
+    no_browser: bool,
 ) -> None:
     name = (name or click.prompt("Account name")).strip()
     if not name:
@@ -117,18 +135,19 @@ def user_add(
 
     serial, pid = new_device_identity()
     verifier, challenge = pkce_pair()
-    url = AmazonDeviceClient.login_url(serial, challenge, language=language)
+    url = AmazonDeviceClient.login_url(serial, challenge, language=language, region=region)
     if no_browser:
         click.echo(f"Open this URL in your preferred browser:\n{url}")
     else:
         click.echo("Opening Amazon sign-in in your browser.")
     click.echo(
-        "After sign-in finishes, copy the complete amazon.com URL from the address bar and paste it here."
+        f"After sign-in finishes, copy the complete {get_region(region).site} URL "
+        "from the address bar and paste it here."
     )
     if not no_browser and not webbrowser.open(url):
         click.echo(f"Open this URL manually:\n{url}")
     final_url = click.prompt("Final URL", prompt_suffix=": ").strip()
-    with AmazonDeviceClient() as client:
+    with AmazonDeviceClient(region=region) as client:
         credentials = client.register(final_url, verifier, serial, pid)
     runtime.store.add(Account(name, credentials), replace=replace)
     runtime.store.save(runtime.config)
@@ -162,7 +181,8 @@ def user_clone(runtime: Runtime, source: str, name: str) -> None:
             "re-login with a current kindl to capture one"
         )
     serial, pid = new_device_identity()
-    with AmazonDeviceClient() as client:
+    # The refresh token belongs to the source account's region.
+    with AmazonDeviceClient(region=account.credentials.region) as client:
         access_token = client.refresh_bearer(refresh_token)
         credentials = client.register_persona(access_token, serial, pid)
     runtime.store.add(Account(name, credentials))

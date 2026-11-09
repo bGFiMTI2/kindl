@@ -40,6 +40,7 @@ Give each Amazon account a local label:
 ```powershell
 uv run kindl user add personal
 uv run kindl user add family
+uv run kindl user add personal-jp --region jp
 uv run kindl user list
 uv run kindl user rm family
 uv run kindl secrets refresh --user personal
@@ -93,9 +94,10 @@ uv run kindl book package "kindl_downloads\EXISTING_BOOK_DIRECTORY"
 ## Device identity
 
 `user add` opens Amazon in your browser. After sign-in, copy the complete final
-`amazon.com/?openid...` URL from the address bar into the prompt. `kindl` never
-receives or stores your Amazon password. Device credentials are persistent, so
-normal later runs do not require another browser login.
+`amazon.com/?openid...` URL (`amazon.co.jp/?openid...` with `--region jp`) from
+the address bar into the prompt. `kindl` never receives or stores your Amazon
+password. Device credentials are persistent, so normal later runs do not
+require another browser login.
 
 To use another browser without opening the default browser automatically:
 
@@ -105,6 +107,25 @@ uv run kindl user add personal --no-browser
 
 Copy the printed sign-in URL into your preferred browser, finish signing in,
 then paste the complete final URL from the address bar into the `Final URL` prompt.
+
+### Regions (`--region`)
+
+Amazon accounts are region-locked: an amazon.co.jp account is separate from an
+amazon.com account, and its library holds titles from its own Kindle Store.
+Choose the region of the Amazon site where you created the account:
+
+- `us` (default): amazon.com
+- `jp`: amazon.co.jp
+
+```powershell
+uv run kindl user add personal-jp --region jp
+```
+
+The region is saved with the account, so `book`, `secrets`, and `user clone`
+use it automatically, and `user list` shows it. Accounts added before regions
+existed are treated as `us`. The region only selects which Amazon site you sign
+in to; it does not move accounts or titles between regions. Other Amazon sites
+are not supported yet.
 
 The default config is `%APPDATA%\kindl\config.json` on Windows and
 `$XDG_CONFIG_HOME/kindl/config.json` (or `~/.config/kindl/config.json`) elsewhere,
