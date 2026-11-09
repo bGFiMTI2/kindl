@@ -16,6 +16,7 @@ represent compatibility approval or permission.
 > circumvention is not a project goal, and contributions adding it are out of
 > scope. Do not share credentials, device keys, vouchers, signed URLs, library
 > exports, downloaded resources, or generated archives.
+> Check out [Satsuoni/DeDRM_tools](https://github.com/Satsuoni/DeDRM_tools) though.
 
 This is unofficial software, is not affiliated with or endorsed by Amazon, and
 is intended for protocol education and interoperability research. Use it only
